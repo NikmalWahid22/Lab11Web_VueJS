@@ -1180,6 +1180,8 @@ Tambahkan kode CSS berikut di bagian paling bawah file `assets/css/style.css`:
 }
 ```
 
+<img width="1279" height="617" alt="login" src="https://github.com/user-attachments/assets/0eba2902-df94-460e-b849-bfef286a3c88" />
+ 
 ---
 
 ## Pertanyaan dan Tugas
@@ -1197,7 +1199,7 @@ Yang diharapkan terjadi:
 - Halaman otomatis diarahkan ke form login (`/#/login`)
 - Halaman artikel tidak bisa diakses sama sekali
 
-Screenshot bagian ini untuk bukti laporan.
+<img width="1280" height="626" alt="skenario1" src="https://github.com/user-attachments/assets/1cbed61e-2c6d-411d-9d39-1837f18128da" />
 
 **Skenario B — Kondisi Login Terautentikasi**
 
@@ -1210,6 +1212,7 @@ Yang diharapkan terjadi:
 - Halaman berpindah ke tabel artikel
 - Menu navigasi atas berubah: link "Login" berganti menjadi "Logout"
 
+<img width="1280" height="632" alt="skenario2" src="https://github.com/user-attachments/assets/566cc726-87d9-4720-9a1c-94a8fccca8c1" />
 
 ---
 
@@ -1537,7 +1540,7 @@ Pengujian dilakukan dengan mengirim request **POST** ke endpoint `/post` tanpa m
 
 Server mengembalikan **HTTP 401 Unauthorized**, membuktikan bahwa filter `ApiAuthFilter` berhasil menolak request yang tidak membawa token.
 
-![Screenshot Postman 401](screenshots/postman_401.png)
+<img width="1272" height="662" alt="postman" src="https://github.com/user-attachments/assets/cc328be4-07c8-49ca-b489-66e7e55b2869" />
 
 ---
 
@@ -1547,18 +1550,11 @@ Setelah login melalui antarmuka web VueJS, dilakukan pengujian tambah data artik
 
 **Bukti pada Request Headers:**
 
-```
-Request URL   : http://localhost:8080/post
-Request Method: POST
-Status Code   : 201 Created
+<img width="1272" height="662" alt="postman" src="https://github.com/user-attachments/assets/eca7e8d1-2361-4f24-8120-e06fc45aa17d" />
 
-Authorization : Bearer VE9LRU4tU0VDUkVULWFkbWlu
-Content-Type  : application/json
-```
 
 Token berhasil terkirim secara otomatis tanpa ditulis manual di setiap fungsi axios, dan server merespons dengan **201 Created** — data berhasil disimpan.
 
-![Screenshot Network DevTools](screenshots/network_token.png)
 
 ---
 
