@@ -483,7 +483,9 @@ const Home = {
 };
 ```
 
-Komponen ini hanya berisi template statis yang ditampilkan ketika pengguna membuka halaman utama (`/`).
+Komponen ini hanya berisi template statis yang ditampilkan ketika pengguna membuka halaman utama (`/`). 
+
+<img width="960" height="476" alt="beranda" src="https://github.com/user-attachments/assets/2263bce6-8392-4259-8ddd-2bb18cd5a431" />
 
 ---
 
@@ -737,6 +739,8 @@ Tambahkan rule berikut pada `assets/css/style.css` untuk styling navigasi dan ha
 
 Class `.router-link-exact-active` secara otomatis ditambahkan oleh Vue Router ke tautan yang sedang aktif, sehingga menu yang dipilih akan terlihat berbeda dari yang lain.
 
+<img width="960" height="467" alt="kelolaartikel" src="https://github.com/user-attachments/assets/b0a4b0a8-73bd-473f-88e4-f99df0847b90" />
+
 ---
 
 ## Pertanyaan dan Tugas
@@ -770,6 +774,8 @@ Tambahkan tautan di navigasi `index.html`:
 ```html
 <router-link to="/about">About</router-link>
 ```
+<img width="959" height="469" alt="about" src="https://github.com/user-attachments/assets/e1f403f1-44c9-453a-95d5-f67981c427c3" />
+
 
 ### 3. Pengujian SPA
 
