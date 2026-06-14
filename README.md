@@ -783,3 +783,469 @@ Lakukan pengujian perpindahan halaman antar menu (Beranda, Kelola Artikel, dan A
 ---
 
 *Laporan Praktikum 12 — VueJS Komponen dan Routing (SPA) | Pemrograman Web*
+
+# Praktikum 13 — VueJS Autentikasi dan Navigation Guards (SPA Security)
+
+## Tujuan
+
+1. Mahasiswa mampu memahami konsep keamanan dan pembatasan hak akses rute pada sisi klien (Client-Side Security).
+2. Mahasiswa mampu memahami konsep Navigation Guards (`beforeEach`) pada Vue Router.
+3. Mahasiswa mampu membuat API Endpoint autentikasi pada backend CodeIgniter 4.
+4. Mahasiswa mampu mengimplementasikan modul Login dan proteksi halaman admin pada aplikasi Single Page Application (SPA) Frontend API.
+
+---
+
+## Teori Singkat
+
+### Apa itu Navigation Guards?
+
+Pada aplikasi web tradisional berbasis server-side (seperti MVC standar CodeIgniter), proteksi halaman dilakukan menggunakan Filters atau Middleware sebelum halaman HTML dirender oleh server. Namun pada arsitektur **Single Page Application (SPA)**, seluruh struktur halaman web sudah dimuat di awal oleh browser klien.
+
+Untuk mengamankan rute-rute tertentu (seperti halaman `/artikel`) agar tidak bisa dibuka oleh pengguna yang belum login, Vue Router menyediakan fitur **Navigation Guards** melalui fungsi `router.beforeEach()`. Fungsi ini bertindak sebagai pencegat perpindahan rute yang akan memeriksa status login pengguna (misalnya mengecek keberadaan token di `localStorage`) sebelum mengizinkan rute tersebut ditampilkan ke browser.
+
+---
+
+## Langkah-langkah Praktikum
+
+### Struktur Direktori
+
+Sesuaikan struktur folder project frontend `lab8_vuejs` dengan menambahkan file `Login.js`:
+
+```
+lab8_vuejs/
+│   index.html
+└───assets/
+    ├───css/
+    │       style.css
+    └───js/
+        │   app.js
+        └───components/
+                Home.js
+                Artikel.js
+                Login.js
+```
+
+---
+
+## TAHAP 1 — Pembuatan API Endpoint Login (Backend CI4)
+
+### Langkah 1.1 — Membuat Auth Controller
+
+Buat file baru di `app/Controllers/Api/Auth.php`. Controller ini bertugas menerima data login dari frontend, memvalidasi ke database, dan mengembalikan token jika berhasil.
+
+**`app/Controllers/Api/Auth.php`**
+
+```php
+<?php
+
+namespace App\Controllers\Api;
+
+use CodeIgniter\RESTful\ResourceController;
+use App\Models\UserModel;
+
+class Auth extends ResourceController
+{
+    protected $format = 'json';
+
+    public function login()
+    {
+        // 1. Menerima data input dari request body
+        $username = $this->request->getVar('username');
+        $password = $this->request->getVar('password');
+
+        $model = new UserModel();
+
+        // 2. Cari user berdasarkan username atau email di database
+        $user = $model->where('username', $username)
+                      ->orWhere('useremail', $username)
+                      ->first();
+
+        if ($user) {
+            // 3. Verifikasi password
+            if ($password === $user['userpassword'] ||
+                password_verify($password, $user['userpassword'])) {
+
+                // Jika sukses, kirim data dan token ke klien
+                return $this->respond([
+                    'status'   => 200,
+                    'error'    => null,
+                    'messages' => 'Login Berhasil',
+                    'data'     => [
+                        'id'       => $user['id'],
+                        'username' => $user['username'],
+                        'token'    => base64_encode("TOKEN-SECRET-" . $user['username'])
+                    ]
+                ], 200);
+            }
+        }
+
+        // 4. Jika gagal, kirim error 401
+        return $this->failUnauthorized('Username atau Password yang Anda masukkan salah.');
+    }
+}
+```
+
+---
+
+### Langkah 1.2 — Mendaftarkan Route API Login
+
+Buka `app/Config/Routes.php`, lalu tambahkan route berikut:
+
+```php
+$routes->post('api/login', 'Api\Auth::login');
+```
+
+---
+
+## TAHAP 2 — Pengembangan Integrasi Frontend (VueJS SPA)
+
+### Langkah 2.1 — Membuat Komponen Login
+
+Buat file baru `assets/js/components/Login.js`. Komponen ini menampilkan form login, merekam input pengguna, dan mengirimkannya ke API backend menggunakan Axios.
+
+**`assets/js/components/Login.js`**
+
+```javascript
+const Login = {
+    template: `
+        <div class="login-container">
+            <div class="login-box">
+                <h2>Form Login Admin</h2>
+                <form @submit.prevent="handleLogin">
+                    <div class="form-group">
+                        <label>Username / Email</label>
+                        <input type="text" v-model="username"
+                            placeholder="Masukkan username" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" v-model="password"
+                            placeholder="Masukkan password" required>
+                    </div>
+                    <button type="submit" class="btn-login">Masuk Aplikasi</button>
+                </form>
+                <p v-if="errorMessage" class="error-msg">{{ errorMessage }}</p>
+            </div>
+        </div>
+    `,
+    data() {
+        return {
+            username: '',
+            password: '',
+            errorMessage: ''
+        }
+    },
+    methods: {
+        handleLogin() {
+            // Kirim data kredensial ke API Endpoint backend CI4
+            axios.post(apiUrl + '/api/login', {
+                username: this.username,
+                password: this.password
+            })
+            .then(response => {
+                if (response.data.status === 200) {
+                    // Simpan status login dan token ke localStorage
+                    localStorage.setItem('isLoggedIn', 'true');
+                    localStorage.setItem('userToken', response.data.data.token);
+
+                    // Alihkan ke halaman artikel
+                    this.$router.push('/artikel');
+                    window.location.reload();
+                }
+            })
+            .catch(error => {
+                // Tangkap pesan error dari backend jika login gagal
+                if (error.response && error.response.data.messages) {
+                    this.errorMessage = error.response.data.messages;
+                } else {
+                    this.errorMessage = 'Terjadi kesalahan jaringan atau server.';
+                }
+            });
+        }
+    }
+};
+```
+
+Setelah login berhasil, komponen ini menyimpan dua hal ke `localStorage`: status login (`isLoggedIn`) dan token (`userToken`) yang akan digunakan oleh Axios Interceptors di praktikum berikutnya.
+
+---
+
+### Langkah 2.2 — Mengonfigurasi Proteksi Rute di app.js
+
+Edit file `assets/js/app.js` untuk mendaftarkan komponen `Login`, menambahkan properti `meta: { requiresAuth: true }` pada rute yang perlu dilindungi, dan membuat fungsi `beforeEach` sebagai pencegat akses rute.
+
+**`assets/js/app.js`**
+
+```javascript
+const { createApp } = Vue;
+const { createRouter, createWebHashHistory } = VueRouter;
+
+// Tentukan lokasi API REST End Point sesuai project CI4
+const apiUrl = 'http://localhost:8080';
+
+// 1. Definisikan mapping rute URL ke Komponen beserta meta-auth
+const routes = [
+    { path: '/', component: Home },
+    { path: '/login', component: Login },
+    {
+        path: '/artikel',
+        component: Artikel,
+        meta: { requiresAuth: true } // Hanya boleh diakses jika sudah login
+    },
+    {
+        path: '/about',
+        component: About,
+        meta: { requiresAuth: true }
+    }
+];
+
+// 2. Buat instance router
+const router = createRouter({
+    history: createWebHashHistory(),
+    routes
+});
+
+// 3. Navigation Guards - Pencegat akses rute
+router.beforeEach((to, from, next) => {
+    const isAuthenticated = localStorage.getItem('isLoggedIn') === 'true';
+
+    // Jika rute butuh autentikasi dan user belum login
+    if (to.matched.some(record => record.meta.requiresAuth) && !isAuthenticated) {
+        alert('Akses Ditolak! Anda harus login terlebih dahulu.');
+        next('/login'); // Belokkan paksa ke halaman login
+    } else {
+        next(); // Izinkan akses
+    }
+});
+
+// 4. Inisialisasi Aplikasi Vue dengan state login global
+const app = createApp({
+    data() {
+        return {
+            isLoggedIn: false
+        }
+    },
+    mounted() {
+        // Cek status login saat aplikasi pertama kali dimuat
+        this.isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+    },
+    methods: {
+        logout() {
+            if (confirm('Apakah Anda yakin ingin keluar aplikasi?')) {
+                localStorage.removeItem('isLoggedIn');
+                localStorage.removeItem('userToken');
+                this.isLoggedIn = false;
+                this.$router.push('/');
+            }
+        }
+    }
+});
+
+app.use(router);
+app.mount('#app');
+```
+
+---
+
+### Langkah 2.3 — Menyesuaikan index.html
+
+Buka `index.html`, muat file `Login.js`, dan tambahkan direktif `v-if` / `v-else` pada navigasi agar tombol Login/Logout berubah secara dinamis sesuai status login pengguna.
+
+**`index.html`**
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secured SPA Frontend VueJS</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Aplikasi Panel Single Page (SPA) - Secured</h1>
+            <nav class="nav-menu">
+                <router-link to="/">Beranda</router-link> |
+                <router-link to="/artikel">Kelola Artikel</router-link> |
+                <router-link to="/about">About</router-link> |
+
+                <!-- Tampilkan Login jika belum login, Logout jika sudah login -->
+                <router-link v-if="!isLoggedIn" to="/login">Login</router-link>
+                <a v-else href="#" @click.prevent="logout">Logout</a>
+            </nav>
+        </header>
+        <main style="margin-top: 20px;">
+            <router-view></router-view>
+        </main>
+    </div>
+
+    <script src="assets/js/components/Home.js"></script>
+    <script src="assets/js/components/Artikel.js"></script>
+    <script src="assets/js/components/Login.js"></script>
+    <script src="assets/js/components/About.js"></script>
+    <script src="assets/js/app.js"></script>
+</body>
+</html>
+```
+
+> 💡 **Catatan:** Direktif `v-if="!isLoggedIn"` akan menampilkan link "Login" saat pengguna belum terautentikasi, dan `v-else` akan menampilkan link "Logout" saat sudah login.
+
+---
+
+### Langkah 2.4 — Menambahkan CSS Form Login
+
+Tambahkan kode CSS berikut di bagian paling bawah file `assets/css/style.css`:
+
+**`assets/css/style.css`** (tambahan)
+
+```css
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 0;
+}
+
+.login-box {
+    width: 350px;
+    padding: 25px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background-color: #ffffff;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.login-box h2 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    text-align: center;
+    color: #333;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.btn-login {
+    width: 100%;
+    padding: 10px;
+    background-color: #3152d6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.btn-login:hover {
+    background-color: #203ca3;
+}
+
+.error-msg {
+    color: red;
+    font-size: 14px;
+    text-align: center;
+    margin-top: 15px;
+}
+```
+
+---
+
+## Pertanyaan dan Tugas
+
+### 1. Selesaikan seluruh pengerjaan kode di atas.
+
+### 2. Pengujian Skenario Keamanan
+
+**Skenario A — Kondisi Terkunci (Belum Login)**
+
+Bersihkan `localStorage` browser (buka DevTools F12 → tab Application → Storage → Local Storage → klik Clear), lalu klik menu "Kelola Artikel".
+
+Yang diharapkan terjadi:
+- Muncul alert: *"Akses Ditolak! Anda harus login terlebih dahulu."*
+- Halaman otomatis diarahkan ke form login (`/#/login`)
+- Halaman artikel tidak bisa diakses sama sekali
+
+Screenshot bagian ini untuk bukti laporan.
+
+**Skenario B — Kondisi Login Terautentikasi**
+
+Buka form login, masukkan username dan password yang valid sesuai data di database, lalu klik "Masuk Aplikasi".
+
+Yang diharapkan terjadi:
+- Axios mengirim request POST ke `/api/login`
+- Server memvalidasi kredensial dan mengembalikan token
+- Token dan status login tersimpan di `localStorage`
+- Halaman berpindah ke tabel artikel
+- Menu navigasi atas berubah: link "Login" berganti menjadi "Logout"
+
+
+---
+
+### 3. Proteksi Halaman About
+
+Tambahkan `meta: { requiresAuth: true }` pada rute `/about` di `app.js` agar halaman profil mahasiswa juga terproteksi dari pengguna yang belum login. Hal ini sudah diterapkan pada konfigurasi `app.js` di langkah 2.2 di atas.
+
+---
+
+## Penjelasan Alur Kerja
+
+### Alur `router.beforeEach`
+
+```
+User klik menu → beforeEach dipanggil → cek localStorage('isLoggedIn')
+       │
+       ├── Belum login + rute butuh auth → alert + redirect ke /login
+       │
+       └── Sudah login / rute bebas → lanjut ke halaman tujuan
+```
+
+Setiap kali pengguna berpindah halaman, fungsi `beforeEach` dipanggil terlebih dahulu. Fungsi ini mengecek apakah rute tujuan memiliki properti `meta.requiresAuth`. Jika iya dan pengguna belum login, akses langsung ditolak dan diarahkan ke halaman login.
+
+### Alur Axios HTTP Post saat Login
+
+```
+User isi form → handleLogin() → axios.post('/api/login', {username, password})
+       │
+       ├── Sukses (200) → simpan isLoggedIn + userToken ke localStorage
+       │                → redirect ke /artikel
+       │
+       └── Gagal (401) → tampilkan pesan error di bawah form
+```
+
+---
+
+## Laporan Praktikum
+
+1. Lanjutkan pada repository GitHub yang sama dengan nama `Lab11Web_VueJS`.
+2. Ambil screenshot jalannya program di browser saat:
+   - Penolakan akses rute (alert + redirect ke login)
+   - Pengisian form login
+   - Respons sukses login (masuk ke halaman artikel)
+   - Setelah menekan tombol Logout
+3. Tuliskan penjelasan analisis ringkas mengenai alur kerja `router.beforeEach` dan Axios HTTP Post di `README.md`.
+4. Lakukan commit dan push seluruh perubahan ke repository GitHub.
+5. Kirimkan URL repository pada platform e-learning ecampus.
+
+---
+
+*Laporan Praktikum 13 — VueJS Autentikasi dan Navigation Guards (SPA Security) | Pemrograman Web*
