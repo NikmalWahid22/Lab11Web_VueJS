@@ -133,6 +133,7 @@ createApp({
 
 Pada tahap ini VueJS akan memanggil endpoint `/post` menggunakan Axios saat halaman pertama kali dimuat (`mounted()`), lalu hasilnya ditampilkan di tabel menggunakan directive `v-for`.
 
+<img width="958" height="360" alt="daftarartikel" src="https://github.com/user-attachments/assets/3feef2af-d499-4796-8d13-55b8a3c5799f" />
 ---
 
 ### Form Tambah dan Ubah Data
