@@ -1249,3 +1249,332 @@ User isi form → handleLogin() → axios.post('/api/login', {username, password
 ---
 
 *Laporan Praktikum 13 — VueJS Autentikasi dan Navigation Guards (SPA Security) | Pemrograman Web*
+
+# Praktikum 14 — Keamanan API, Autentikasi Token, dan Axios Interceptors
+
+## Tujuan
+
+1. Mahasiswa mampu memahami konsep keamanan RESTful API menggunakan Token-Based Authentication.
+2. Mahasiswa mampu mengimplementasikan Filters pada CodeIgniter 4 untuk mengamankan endpoint API dari akses ilegal.
+3. Mahasiswa mampu memahami dan mengimplementasikan fungsi Axios Interceptors pada aplikasi Frontend VueJS.
+4. Mahasiswa mampu melakukan pengujian transmisi data yang aman antara Frontend SPA dan Backend API secara end-to-end.
+
+---
+
+## Teori Singkat
+
+Pada praktikum sebelumnya, keamanan yang diterapkan baru sebatas **Client-Side Security** menggunakan Vue Router Navigation Guards. Keamanan tersebut belum cukup, karena orang lain masih bisa menembak endpoint REST API secara langsung melalui tools seperti Postman tanpa harus melalui antarmuka web sama sekali.
+
+Oleh karena itu, diperlukan **Server-Side Security** menggunakan token. Cara kerjanya:
+
+1. Saat pengguna berhasil login, server memberikan sebuah string acak unik **(Token)**
+2. Token tersebut wajib disimpan oleh aplikasi klien (di `localStorage`)
+3. Setiap request ke endpoint yang diamankan harus menyertakan token di **HTTP Header**:
+   ```
+   Authorization: Bearer <token>
+   ```
+4. Server akan memeriksa token tersebut sebelum memproses request
+
+Di sisi klien, untuk menghindari penulisan kode pelampiran token secara manual di setiap fungsi `axios.get` atau `axios.post`, digunakan **Axios Interceptors** — fitur yang mencegat setiap request keluar dan menyuntikkan token dari `localStorage` ke dalam HTTP Header secara otomatis.
+
+---
+
+## Langkah-langkah Praktikum
+
+---
+
+## TAHAP 1 — Mengamankan Endpoint API (Backend CI4)
+
+### Langkah 1.1 — Membuat API Auth Filter
+
+Buat file baru `app/Filters/ApiAuthFilter.php`. File ini bertugas sebagai "satpam" yang memeriksa setiap request masuk apakah membawa token valid atau tidak.
+
+**`app/Filters/ApiAuthFilter.php`**
+
+```php
+<?php
+
+namespace App\Filters;
+
+use CodeIgniter\Filters\FilterInterface;
+use CodeIgniter\Http\RequestInterface;
+use CodeIgniter\Http\ResponseInterface;
+use Config\Services;
+
+class ApiAuthFilter implements FilterInterface
+{
+    public function before(RequestInterface $request, $arguments = null)
+    {
+        // 1. Ambil data Header Authorization dari request klien
+        $authHeader = $request->getServer('HTTP_AUTHORIZATION');
+
+        if (!$authHeader) {
+            // Jika header tidak ditemukan, kirim respon error 401
+            $response = Services::response();
+            $response->setStatusCode(401);
+            return $response->setJSON([
+                'status'   => 401,
+                'error'    => 401,
+                'messages' => 'Akses Ditolak. Token tidak ditemukan pada request!'
+            ]);
+        }
+
+        // 2. Ekstrak string token (memisahkan kata 'Bearer' dengan string token)
+        $token = null;
+        if (preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+            $token = $matches[1];
+        }
+
+        // 3. Validasi Token
+        // Catatan: pada production, bagian ini divalidasi menggunakan library JWT
+        if (!$token || empty($token)) {
+            $response = Services::response();
+            $response->setStatusCode(401);
+            return $response->setJSON([
+                'status'   => 401,
+                'error'    => 401,
+                'messages' => 'Sesi Token tidak valid atau kedaluwarsa!'
+            ]);
+        }
+    }
+
+    public function after(RequestInterface $request, ResponseInterface $response, $arguments = null)
+    {
+        // Tidak diperlukan aksi setelah request diproses
+    }
+}
+```
+
+---
+
+### Langkah 1.2 — Mendaftarkan Filter
+
+Buka file `app/Config/Filters.php`, lalu tambahkan alias `apiauth` di dalam array `$aliases`:
+
+**`app/Config/Filters.php`**
+
+```php
+public array $aliases = [
+    'csrf'          => CSRF::class,
+    'toolbar'       => DebugToolbar::class,
+    'honeypot'      => Honeypot::class,
+    'auth'          => \App\Filters\Auth::class,
+    'invalidchars'  => InvalidChars::class,
+    'secureheaders' => SecureHeaders::class,
+    'cors'          => Cors::class,
+    'forcehttps'    => ForceHTTPS::class,
+    'pagecache'     => PageCache::class,
+    'performance'   => PerformanceMetrics::class,
+    'apiauth'       => \App\Filters\ApiAuthFilter::class, // ← tambahkan baris ini
+];
+```
+
+---
+
+### Langkah 1.3 — Menerapkan Filter ke Route
+
+Buka file `app/Config/Routes.php`, tambahkan 3 route berikut **sebelum** `$routes->resource('post')` agar filter `apiauth` diterapkan khusus untuk method POST, PUT, dan DELETE:
+
+**`app/Config/Routes.php`**
+
+```php
+// Mengamankan method POST, PUT, dan DELETE untuk resource /post
+$routes->post('post', 'Post::create', ['filter' => 'apiauth']);
+$routes->put('post/(:segment)', 'Post::update/$1', ['filter' => 'apiauth']);
+$routes->delete('post/(:segment)', 'Post::delete/$1', ['filter' => 'apiauth']);
+
+$routes->resource('post');
+```
+
+> 💡 **Catatan:** Route GET `/post` (untuk melihat data) tetap bebas diakses tanpa token. Hanya operasi tambah, ubah, dan hapus yang wajib membawa token.
+
+---
+
+## TAHAP 2 — Implementasi Axios Interceptors (Frontend VueJS)
+
+### Langkah 2.1 — Menambahkan Interceptor di app.js
+
+Tambahkan blok Axios Interceptors pada file `assets/js/app.js`, tepat setelah deklarasi `apiUrl` dan sebelum konfigurasi `routes`. Blok ini akan otomatis menyuntikkan token ke setiap request yang keluar dari aplikasi VueJS.
+
+**`assets/js/app.js` (full)**
+
+```javascript
+const { createApp } = Vue;
+const { createRouter, createWebHashHistory } = VueRouter;
+
+// Tentukan lokasi API REST End Point sesuai project CI4
+const apiUrl = 'http://localhost:8080';
+
+// =========================================================================
+// IMPLEMENTASI AXIOS INTERCEPTORS (Penyuntik Token Otomatis)
+// =========================================================================
+axios.interceptors.request.use(
+    (config) => {
+        // Ambil token dari local storage browser
+        const token = localStorage.getItem('userToken');
+
+        // Jika token tersedia, masukkan ke dalam HTTP Header Authorization Bearer
+        if (token) {
+            config.headers['Authorization'] = 'Bearer ' + token;
+        }
+        return config;
+    },
+    (error) => {
+        return Promise.reject(error);
+    }
+);
+
+// Tangkap secara global jika server merespon dengan error 401 (Unauthorized)
+axios.interceptors.response.use(
+    (response) => {
+        return response;
+    },
+    (error) => {
+        if (error.response && error.response.status === 401) {
+            alert('Sesi Anda telah berakhir atau Token tidak sah. Silakan login kembali.');
+            localStorage.clear();
+            window.location.href = '#/login';
+            window.location.reload();
+        }
+        return Promise.reject(error);
+    }
+);
+// =========================================================================
+
+// 1. Definisikan mapping rute URL ke Komponen beserta meta-auth
+const routes = [
+    { path: '/', component: Home },
+    { path: '/login', component: Login },
+    { path: '/artikel', component: Artikel, meta: { requiresAuth: true } },
+    { path: '/about', component: About, meta: { requiresAuth: true } }
+];
+
+// 2. Buat instance router
+const router = createRouter({
+    history: createWebHashHistory(),
+    routes
+});
+
+// 3. Navigation Guards - Pencegat akses rute
+router.beforeEach((to, from, next) => {
+    const isAuthenticated = localStorage.getItem('isLoggedIn') === 'true';
+
+    if (to.matched.some(record => record.meta.requiresAuth) && !isAuthenticated) {
+        alert('Akses Ditolak! Anda harus login terlebih dahulu.');
+        next('/login');
+    } else {
+        next();
+    }
+});
+
+// 4. Inisialisasi Aplikasi Vue dengan state login global
+const app = createApp({
+    data() {
+        return {
+            isLoggedIn: false
+        }
+    },
+    mounted() {
+        this.isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+    },
+    methods: {
+        logout() {
+            if (confirm('Apakah Anda yakin ingin keluar aplikasi?')) {
+                localStorage.removeItem('isLoggedIn');
+                localStorage.removeItem('userToken');
+                this.isLoggedIn = false;
+                this.$router.push('/');
+            }
+        }
+    }
+});
+
+app.use(router);
+app.mount('#app');
+```
+
+---
+
+## Pertanyaan dan Tugas
+
+### 1. Terapkan seluruh langkah praktikum di atas
+
+Semua langkah mulai dari pembuatan `ApiAuthFilter.php`, pendaftaran alias di `Filters.php`, penerapan filter ke route di `Routes.php`, hingga penambahan Axios Interceptors di `app.js` telah diterapkan sesuai urutan.
+
+---
+
+### 2. Simulasi Pengujian Pembobolan via Postman
+
+Pengujian dilakukan dengan mengirim request **POST** ke endpoint `/post` tanpa menyertakan token pada header menggunakan aplikasi Postman.
+
+**Konfigurasi request:**
+- Method: `POST`
+- URL: `http://localhost:8080/post`
+- Body: `x-www-form-urlencoded` → `judul: Test Bobol`, `isi: Coba kirim tanpa token`
+- Header `Authorization`: **tidak diisi**
+
+**Hasil response:**
+
+```json
+{
+    "status": 401,
+    "error": 401,
+    "messages": "Akses Ditolak. Token tidak ditemukan pada request!"
+}
+```
+
+Server mengembalikan **HTTP 401 Unauthorized**, membuktikan bahwa filter `ApiAuthFilter` berhasil menolak request yang tidak membawa token.
+
+![Screenshot Postman 401](screenshots/postman_401.png)
+
+---
+
+### 3. Pengujian CRUD melalui Browser dengan Axios Interceptors
+
+Setelah login melalui antarmuka web VueJS, dilakukan pengujian tambah data artikel. Melalui tab **Network** di DevTools (F12), dapat dikonfirmasi bahwa token berhasil disisipkan secara otomatis oleh Axios Interceptors pada setiap request yang dikirim ke server.
+
+**Bukti pada Request Headers:**
+
+```
+Request URL   : http://localhost:8080/post
+Request Method: POST
+Status Code   : 201 Created
+
+Authorization : Bearer VE9LRU4tU0VDUkVULWFkbWlu
+Content-Type  : application/json
+```
+
+Token berhasil terkirim secara otomatis tanpa ditulis manual di setiap fungsi axios, dan server merespons dengan **201 Created** — data berhasil disimpan.
+
+![Screenshot Network DevTools](screenshots/network_token.png)
+
+---
+
+### 4. Kesimpulan — Perbedaan Navigation Guard vs CI4 Filter
+
+Dari hasil praktikum ini, dapat disimpulkan perbedaan mendasar antara dua mekanisme keamanan yang diterapkan:
+
+| Aspek | Vue Router Navigation Guard | CodeIgniter Filter (ApiAuthFilter) |
+|-------|----------------------------|-------------------------------------|
+| **Lokasi** | Sisi klien (browser) | Sisi server (backend) |
+| **Cara kerja** | Mengecek `localStorage` sebelum pindah halaman | Mengecek header `Authorization` sebelum memproses request |
+| **Yang dilindungi** | Akses ke halaman/tampilan | Akses ke data di database |
+| **Kekuatan** | Lemah — bisa dilewati dengan edit `localStorage` atau langsung tembak API via Postman | Kuat — tidak bisa dilewati tanpa token valid, apapun tools yang digunakan |
+| **Tujuan utama** | Pengalaman pengguna (UX) yang rapi | Keamanan data yang sesungguhnya |
+
+**Kesimpulan:** Vue Router Navigation Guard hanya berfungsi sebagai "papan petunjuk" di sisi tampilan yang mengarahkan pengguna yang belum login ke halaman login. Namun perlindungan ini mudah dilewati karena hanya berjalan di browser. Sebaliknya, CodeIgniter Filter bertindak sebagai "kunci pintu" yang sesungguhnya di sisi server — setiap request yang masuk wajib membawa token valid, sehingga meskipun seseorang mencoba mengakses API langsung tanpa melalui aplikasi web, tetap akan ditolak dengan error 401. Kedua mekanisme ini saling melengkapi: Navigation Guard memberikan pengalaman pengguna yang baik, sedangkan CI4 Filter yang menjamin keamanan data secara nyata.
+
+---
+
+## Laporan Praktikum
+
+1. Lanjutkan pada repository `Lab11Web_VueJS`.
+2. Simpan screenshot bukti penolakan **401 Unauthorized** dari Postman.
+3. Simpan screenshot tab **Network** DevTools yang menunjukkan header `Authorization: Bearer <token>` berhasil disisipkan otomatis.
+4. Update file `README.md` dengan penjelasan setiap langkah beserta screenshotnya.
+5. Lakukan commit dan push ke repository GitHub.
+6. Kirimkan URL repository pada platform e-learning ecampus.
+
+---
+
+*Laporan Praktikum 14 — Keamanan API, Autentikasi Token, dan Axios Interceptors | Pemrograman Web*
